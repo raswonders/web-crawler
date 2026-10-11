@@ -22,11 +22,8 @@ func getURLsFromHTML(htmlBody string, baseURL *url.URL) ([]string, error) {
 			if err != nil {
 				fmt.Println("href couldn't be parsed as url") 
 			}
-			if url.IsAbs() {
-				res = append(res, url.String())
-				return
-			} 
-			res = append(res, baseURL.String()+url.String())
+			resolved := baseURL.ResolveReference(url)
+			res = append(res, resolved.String())
 		}
 	})
 
