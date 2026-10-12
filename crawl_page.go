@@ -3,26 +3,21 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"time"
 )
 
-func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
-	fmt.Printf("crawling %s\n", rawCurrentURL)
+func (cfg *config) crawlPage(rawCurrentURL string) {
+	defer cfg.wg.Done()
 
+	fmt.Printf("crawling %s\n", rawCurrentURL)
 	currentURL, err := url.Parse(rawCurrentURL)
 	if err != nil {
 		fmt.Printf("couldn't parse current URL %q: %v\n", rawCurrentURL, err)
 		return
 	}
 
-	baseURL, err := url.Parse(rawBaseURL)
-	if err != nil {
-		fmt.Printf("couldn't parse base URL %q: %v\n", rawBaseURL, err)
-		return
-	}
 
-	if currentURL.Host != baseURL.Host {
-		fmt.Printf("current url %q is not from same domain as base %q\n", currentURL, baseURL)
+	if currentURL.Host != cfg.baseURL.Host {
+		fmt.Printf("current url %q is not from same domain as base %q\n", currentURL, cfg.baseURL)
 		return
 	}	
 
@@ -32,27 +27,32 @@ func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
 		return 
 	}
 
-	_, isVisited := pages[url];
+	cfg.mu.Lock()
+	_, isVisited := cfg.pages[url];
 	if isVisited {
-		pages[url] = pages[url] + 1
+		fmt.Println("visited! leaving")
+		cfg.mu.Unlock()
 		return
 	}
-	pages[url] = 1
+	cfg.pages[url] = PageData{}
+	cfg.mu.Unlock()
 
+	cfg.concurrencyControl <- struct{}{};
 	html, err := getHTML(rawCurrentURL)
+	<-cfg.concurrencyControl
 	if err != nil {
 		fmt.Printf("couldn't fetch html %v\n", err)
 		return
 	}
 	fmt.Println(html)
-	time.Sleep(500 * time.Millisecond)
 
-	nextURLs, err := getURLsFromHTML(html, baseURL)
-	if err != nil {
-		fmt.Printf("couldn't get urls: %v\n", err)
-	}
+	page := extractPageData(html, rawCurrentURL);
+	cfg.mu.Lock()
+	cfg.pages[url] = page 
+	cfg.mu.Unlock()
 
-	for _, u := range nextURLs {
-		crawlPage(rawBaseURL, u, pages)
+	for _, u := range page.OutgoingLinks {
+		cfg.wg.Add(1)
+		go cfg.crawlPage(u)
 	}
 }
